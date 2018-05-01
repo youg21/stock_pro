@@ -1,5 +1,6 @@
 from pytdx.hq import TdxHq_API
 from pytdx.params import TDXParams
+import pandas as pd
 
 from stock.models import BankBasicInfo, StockBasicInfo
 
@@ -8,9 +9,9 @@ class BankInfo:
     '''
     BankInfo类，旨在获取与板块相关的一切数据，如板块资本资料数据、板块交易数据等
     '''
-    
-    def get_basic_info(self):
-        pass
+    def get_basic_info(self,by='tdx'):
+        if by == 'tdx':
+            self._get_bankinfo_tdx()
     
     def _get_bankinfo_tdx(self):
         '''

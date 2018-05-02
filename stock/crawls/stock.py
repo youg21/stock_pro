@@ -1,7 +1,11 @@
 import tushare as ts
-from stock.models import StockBasicInfo
 from dateutil.parser import parse
+from pytdx.hq import TdxHq_API
+from pytdx.params import TDXParams
+import pandas as pd
+from django.db import connection
 
+from stock.models import StockBasicInfo
 
 class StockInfo:
     '''
@@ -53,8 +57,8 @@ class StockInfo:
         
         # 通过东方财富网站，来获取个股的资金流动数据
         # 字段包括main_money、main_money_rate、super_money、super_money_rate、large_money、large_money_rate、midden_money、midden_money_rate、small_money、small_money_rate
-        
-
+        hq_data = self.__get_trade_hq(code='000001')
+        print(hq_data)
     
     
     
@@ -78,8 +82,45 @@ class StockInfo:
         pass
 
 
-
-
+    def __get_trade_hq(self,code,days=10,adj='qfq'):
+        mkcode = 1 if code.startswith('6') else 0
+        api = TdxHq_API()
+        with api.connect('218.108.98.244', 7709):
+            data = api.get_security_bars(TDXParams.KLINE_TYPE_DAILY, mkcode, code, 0, days+1)
+            data = api.to_df(data)
+            data['datetime'] = data['datetime'].apply(lambda x: str(x[0:10]))
+            data['datetime'] = pd.to_datetime(data['datetime'])
+            data = data.assign(code=str(code))\
+                .set_index('datetime',drop=True,inplace=False)\
+                .drop(['year', 'month', 'day', 'hour','minute'],axis=1)
+            data = data.sort_index(ascending=False)
+            # 加入复权因子，计算复权数据
+            if adj:
+                df_adj = pd.read_csv('http://file.tushare.org/tsdata/f/factor/{0}.csv'.format(code))
+                df_adj = df_adj.set_index('datetime')
+                data = data.merge(df_adj, how='left',left_index=True, right_index=True)
+                data['adj_factor'] = data['adj_factor'].fillna(method='bfill')
+                for col in ['open', 'close', 'high', 'low']:
+                    if adj == 'qfq':
+                        data[col] = data[col] * data['adj_factor'] / float(df_adj['adj_factor'][0])
+                    else:
+                        data[col] = data[col] * data['adj_factor']
+                    # data[col] = data[col].map(lambda x: '%.2f' % x)   # 会引起类型转换，从float转换成str
+            # 计算换手率
+            cursor = connection.cursor()
+            cursor.execute('select outstanding from stock_stockbasicinfo where code="000001"')
+            outstanding = cursor.fetchone()[0]*10**8
+            data['outstanding'] = outstanding
+            data['turnover'] = data['vol'] / data['outstanding'] * 100
+            # 计算涨跌幅
+            data['pre_close'] = data['close'].shift(-1)
+            data['change_rate'] = (data['close'] - data['pre_close']) / data['pre_close'] * 100
+            data = data.dropna()
+            data = data[['code','pre_close','open','close','high','low','vol','amount','change_rate','turnover','outstanding']]
+            return data
+    
+    def __get_trade_money(self):
+        pass
 
 
 

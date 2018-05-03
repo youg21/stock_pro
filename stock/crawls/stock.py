@@ -16,7 +16,7 @@ from stock.models import StockBasicInfo,StockTradeMoneyHis
 from stock.crawls.crawlutils import get_user_agent_dict,compute_times
 
 
-class StockInfo:
+class StockCrawl:
     '''
     StockInfo类旨在获取一切与个股相关的数据，如个股基本资料数据、个股历史交易数据、个股当日数据等
     '''

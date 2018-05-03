@@ -57,7 +57,7 @@ class StockInfo:
             stock_info.save()
     
     @compute_times
-    def get_trade_his(self,days=10,adj='qfq'):
+    def get_trade_his(self,codes=None,days=10,adj='qfq'):
         '''
         获取个股历史交替数据
         通过pytdx获取行情数据，字段包括open、close、high、low、vol、amount
@@ -67,7 +67,10 @@ class StockInfo:
         :return:
         '''
         # 获取全部股票代码
-        stocks = StockBasicInfo.objects.all()
+        if codes:
+            stocks = StockBasicInfo.objects.filter(code__in=codes)
+        else:
+            stocks = StockBasicInfo.objects.all()
         # 创建线程池
         pool = ThreadPoolExecutor(50)
         # 获取数据，并通过多线程讲数据存入到数据库
@@ -75,15 +78,20 @@ class StockInfo:
         for stock in stocks:
             code = stock.code
             name = stock.name
-            hq_data = self.__get_trade_hq(code=code,days=days,adj=adj)
-            money_data = self.__get_trade_money(code=code,days=days)
-            df_all = pd.concat([hq_data, money_data], axis=1)
-            df_all['name'] = name
-            df_all = df_all.dropna()
-            pool.submit(self.__trade_his_to_db,df_all)
-            time.sleep(random.randint(5,15)/10)
-            print('===============code:{0}---{1}次================='.format(code,i))
-            i += 1
+            for _ in range(3):
+                try:
+                    hq_data = self.__get_trade_hq(code=code, days=days, adj=adj)
+                    money_data = self.__get_trade_money(code=code, days=days)
+                    df_all = pd.concat([hq_data, money_data], axis=1)
+                    df_all['name'] = name
+                    df_all = df_all.dropna()
+                    pool.submit(self.__trade_his_to_db, df_all)
+                    time.sleep(random.randint(5, 15) / 10)
+                    print('===============code:{0}---{1}次================='.format(code, i))
+                    i += 1
+                    break
+                except Exception as e:
+                    print(e)
     
     def get_trade_today_min(self):
         '''

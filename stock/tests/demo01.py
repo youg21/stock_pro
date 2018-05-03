@@ -8,7 +8,7 @@ from stock.crawls.stock import StockInfo
 
 stockinfo = StockInfo()
 
-stockinfo.get_trade_his()
+stockinfo.get_trade_his(days=10,adj='qfq')
 
 
 

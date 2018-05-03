@@ -2,6 +2,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor
 import time
+import random
 
 import tushare as ts
 from dateutil.parser import parse
@@ -70,16 +71,19 @@ class StockInfo:
         # 创建线程池
         pool = ThreadPoolExecutor(50)
         # 获取数据，并通过多线程讲数据存入到数据库
+        i = 1
         for stock in stocks:
             code = stock.code
             name = stock.name
-            hq_data = self.__get_trade_hq(code=code,days=days,adj='qfq')
+            hq_data = self.__get_trade_hq(code=code,days=days,adj=adj)
             money_data = self.__get_trade_money(code=code,days=days)
             df_all = pd.concat([hq_data, money_data], axis=1)
             df_all['name'] = name
             df_all = df_all.dropna()
             pool.submit(self.__trade_his_to_db,df_all)
-            time.sleep(0.5)
+            time.sleep(random.randint(5,15)/10)
+            print('===============code:{0}---{1}次================='.format(code,i))
+            i += 1
     
     def get_trade_today_min(self):
         '''
@@ -117,11 +121,10 @@ class StockInfo:
                     if adj == 'qfq':
                         data[col] = data[col] * data['adj_factor'] / float(df_adj['adj_factor'][0])
                     else:
-                        data[col] = data[col] * data[
-                            'adj_factor']  # data[col] = data[col].map(lambda x: '%.2f' % x)   # 会引起类型转换，从float转换成str
+                        data[col] = data[col] * data['adj_factor']  # data[col] = data[col].map(lambda x: '%.2f' % x)   # 会引起类型转换，从float转换成str
             # 计算换手率
             cursor = connection.cursor()
-            cursor.execute('select outstanding from stock_stockbasicinfo where code="000001"')
+            cursor.execute('select outstanding from stock_stockbasicinfo where code="{0}"'.format(code))
             outstanding = cursor.fetchone()[0] * 10 ** 8
             data['outstanding'] = outstanding
             data['turnover'] = data['vol'] / data['outstanding'] * 100
@@ -162,7 +165,7 @@ class StockInfo:
         # df_money['code'] = code
         df_money = df_money.sort_index(ascending=False)
         return df_money
-
+    
     def __trade_his_to_db(self,data):
         last_date = data.index[-1]
         # 删除已存在的数据

@@ -11,15 +11,28 @@ from stock.models import StockBasicInfo,StockTradeMoneyHis
 from stock.analysis.stock import StockAnalysis
 from stock.analysis.bank import BankAnalysis
 
-def crawl_stock_trade_info():
-    cursor = connection.cursor()
-    cursor.execute(
-        'SELECT DISTINCT code from stock_stockbasicinfo where code not in (select DISTINCT `code` from stock_stocktrademoneyhis)')
-    codes = cursor.fetchall()
-    codes = [code[0] for code in codes]
-    print(codes)
+def crawl_stock_trade_info(days=1):
+    # 存储指定天数的交易信息
     stockinfo = StockCrawl()
-    stockinfo.get_trade_his(codes=codes, days=10, adj='qfq')
+    store_codes = stockinfo.get_trade_his(days=days, adj='qfq')
+    if store_codes:
+        not_store_stocks = StockBasicInfo.objects.exclude(code__in=store_codes)
+    not_store_codes = [stock.code for stock in not_store_stocks]
+    stockinfo = StockCrawl()
+    store_codes = stockinfo.get_trade_his(codes=not_store_codes , days=days, adj='qfq')
+    print(store_codes)
+    
+    
+    # cursor = connection.cursor()
+    # cursor.execute(
+    #     'SELECT DISTINCT code from stock_stockbasicinfo where code not in (select DISTINCT `code` from stock_stocktrademoneyhis)')
+    # codes = cursor.fetchall()
+    # codes = [code[0] for code in codes]
+    # print(codes)
+    # stockinfo = StockCrawl()
+    # stockinfo.get_trade_his(codes=codes, days=10, adj='qfq')
+    
+    
     
 def analysis_stock_trade_info():
     analysis = StockAnalysis()
@@ -32,7 +45,8 @@ def analysis_bank():
 
 if __name__ == '__main__':
     # analysis_stock_trade_info()
-    analysis_bank()
+    # analysis_bank()
+    crawl_stock_trade_info(days=30)
 
 
 

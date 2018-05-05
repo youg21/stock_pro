@@ -136,7 +136,50 @@ STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'static'),
 ]
 
-
+# Django 控制台打印SQL，settings.py 配置修改
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '%(levelname)s %(asctime)s %(module)s %(process)d %(thread)d %(message)s'
+        },
+        'simple': {
+            'format': '%(levelname)s %(asctime)s %(module)s %(funcName)s %(lineno)d: %(message)s'
+            # 'format': '%(levelname)s %(asctime)s %(pathname)s %(filename)s %(module)s %(funcName)s %(lineno)d: %(message)s'
+        },
+    },
+    'handlers': {
+        'console':{
+            'level':'DEBUG',
+            'class':'logging.StreamHandler',
+        },
+        'filehandler_info':{
+            'level':'INFO',
+            'class':'logging.FileHandler',
+            'filename':os.path.join(BASE_DIR, 'logging/mylogger_info.txt'),
+            'formatter':'simple',
+        },
+        'filehandler_error':{
+            'level':'ERROR',
+            'class':'logging.FileHandler',
+            'filename':os.path.join(BASE_DIR, 'logging/mylogger_error.txt'),
+            'formatter':'simple',
+        },
+    },
+    'loggers': {
+        'mylogger':{
+            'handlers':['filehandler_info','filehandler_error'],
+            'propagate': True, # 是否继承父类的log信息
+            'level':'DEBUG',
+        },
+        # 'django.db.backends': {
+        #     'handlers': ['console'],
+        #     'propagate': True,
+        #     'level':'DEBUG',
+        # },
+    }
+}
 
 
 

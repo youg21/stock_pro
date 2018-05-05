@@ -3,6 +3,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 import time
 import random
+import logging
 
 import tushare as ts
 from dateutil.parser import parse
@@ -15,6 +16,8 @@ import requests
 from stock.models import StockBasicInfo,StockTradeMoneyHis
 from stock.crawls.crawlutils import get_user_agent_dict,compute_times
 
+# 获取logging
+log = logging.getLogger('mylogger')
 
 class StockCrawl:
     '''
@@ -57,7 +60,7 @@ class StockCrawl:
             stock_info.save()
     
     @compute_times
-    def get_trade_his(self,codes=None,days=10,adj='qfq'):
+    def get_trade_his(self,codes=None,days=1,adj='qfq'):
         '''
         获取个股历史交替数据
         通过pytdx获取行情数据，字段包括open、close、high、low、vol、amount
@@ -72,9 +75,10 @@ class StockCrawl:
         else:
             stocks = StockBasicInfo.objects.all()
         # 创建线程池
-        pool = ThreadPoolExecutor(50)
+        pool = ThreadPoolExecutor(100)
         # 获取数据，并通过多线程讲数据存入到数据库
         i = 1
+        store_stocks = []
         for stock in stocks:
             code = stock.code
             name = stock.name
@@ -86,12 +90,19 @@ class StockCrawl:
                     df_all['name'] = name
                     df_all = df_all.dropna()
                     pool.submit(self.__trade_his_to_db, df_all)
-                    time.sleep(random.randint(5, 15) / 10)
+                    time.sleep(random.randint(10, 20) / 10)
                     print('===============code:{0}---{1}次================='.format(code, i))
+                    store_stocks.append(code)
                     i += 1
                     break
                 except Exception as e:
-                    print(e)
+                    info = 'code={0}获取数据出错'.format(code)
+                    info = info + '\t' + str(e)
+                    print(info)
+                    log.error(info)
+        # 返回已存储股票代码
+        return store_stocks
+                    
     
     def get_trade_today_min(self):
         '''
@@ -231,7 +242,8 @@ class StockCrawl:
             stock_trade_list.append(stock_trade)
         StockTradeMoneyHis.objects.bulk_create(stock_trade_list)
     
-    
+    def __get_trade_today(self):
+        pass
     
     
     

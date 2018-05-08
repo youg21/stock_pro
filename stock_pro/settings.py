@@ -159,12 +159,14 @@ LOGGING = {
             'class':'logging.FileHandler',
             'filename':os.path.join(BASE_DIR, 'logging/mylogger_info.txt'),
             'formatter':'simple',
+            'encoding':'utf8',
         },
         'filehandler_error':{
             'level':'ERROR',
             'class':'logging.FileHandler',
             'filename':os.path.join(BASE_DIR, 'logging/mylogger_error.txt'),
             'formatter':'simple',
+            'encoding':'utf8',
         },
     },
     'loggers': {

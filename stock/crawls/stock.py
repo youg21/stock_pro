@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 import random
 import logging
+import datetime
+from threading import Thread
 
 import tushare as ts
 from dateutil.parser import parse
@@ -12,8 +14,9 @@ from pytdx.params import TDXParams
 import pandas as pd
 from django.db import connection
 import requests
+import demjson
 
-from stock.models import StockBasicInfo,StockTradeMoneyHis
+from stock.models import StockBasicInfo,StockTradeMoneyHis,StockTradeMoneyToday
 from stock.crawls.crawlutils import get_user_agent_dict,compute_times
 
 # 获取logging
@@ -102,7 +105,6 @@ class StockCrawl:
                     log.error(info)
         # 返回已存储股票代码
         return store_stocks
-                    
     
     def get_trade_today_min(self):
         '''
@@ -111,13 +113,29 @@ class StockCrawl:
         '''
         pass
     
-    def get_trade_today_last(self):
+    @compute_times
+    def get_trade_today_last(self,trade_date=datetime.datetime.now()):
         '''
         获取当日个股最新数据
         :return:
         '''
-        pass
-    
+        for _ in range(3):
+            try:
+                # ['code','name','close','change_money','change_rate','zhenfu','vol','amount','pre_close','open','high','low','zhangdie_5min','liangbi','turnover','pe','timeToMarket']
+                df_trade = self.__get_trade_today_last()
+                # ['code','name','main_money','main_money_rate','super_money','super_money_rate','large_money','large_money_rate','midden_money','midden_money_rate','small_money','small_money_rate']
+                df_money = self.__get_money_today_last()
+                df_money = df_money.drop('name',axis=1)
+                df = pd.merge(df_trade,df_money,on='code')
+                df['trade_date'] = trade_date
+                
+                # 将数据存入数据库中
+                Thread(target=self.__trade_today_to_db, args=[df,]).start()
+                
+                break
+            except Exception as e:
+                log.error(e)
+            
     def __get_trade_hq(self, code, days=10, adj='qfq'):
         mkcode = 1 if code.startswith('6') else 0
         api = TdxHq_API()
@@ -242,10 +260,153 @@ class StockCrawl:
             stock_trade_list.append(stock_trade)
         StockTradeMoneyHis.objects.bulk_create(stock_trade_list)
     
-    def __get_trade_today(self):
-        pass
-    
-    
+    def __get_trade_today_last(self):
+        # 获取个股当日交易信息
+        stock_trade_today_url = 'http://nufm.dfcfw.com/EM_Finance2014NumericApplication/JS.aspx?type=CT&cmd=C._A&sty=FCOIATA&sortType=(ChangePercent)&sortRule=-1&page=1&pageSize=5000&js=var%20FVuEefaj={rank:[(x)],pages:(pc),total:(tot)}&token=7bc05d0d4c3c22ef9fca8c2a912d779c'
+        content = requests.get(stock_trade_today_url,headers=get_user_agent_dict()).text
+        content = content.lstrip('var FVuEefaj=').strip()
+        content_json = demjson.decode(content)
+        stocks = [stock.split(',') for stock in content_json.get('rank')]
+        
+        # 处理空值的正则表达式
+        regex_null = re.compile(r'^-$')
+        # 存储最终结果
+        
+        result_list = []
+        for stock in stocks:
+            stock_name = stock[1:3]                     # 获取个股代码、名称
+            stock_trade = stock[3:13]                   # 获取行情数据
+            stock_trade_tmp = stock[21:25]              # 获取行情数据
+            stock_timetomarket = stock[-1]              # 获取上市日期
+            stock_trade.extend(stock_trade_tmp)         # 将2段行情数据连接
+            
+            # 处理空值
+            stock_trade = list(map(lambda x: '0' if regex_null.match(x) else x, stock_trade))
+            # 去掉%
+            stock_trade = [item.strip().rstrip('%') for item in stock_trade]
+            # 转换成数字
+            stock_trade = [float(item) for item in stock_trade]
+            # 转换交易量单位，将手转换成股数
+            stock_trade[4] *= 100
+            
+            # 处理上市日期
+            stock_timetomarket = parse(stock_timetomarket)
+            
+            # 将3个列表连成1个列表，形成最终结果
+            stock_name.extend(stock_trade)
+            stock_name.append(stock_timetomarket)
+            result = stock_name
+            
+            result_list.append(result)
+        
+        # 将数据封装成DataFrame
+        df_result = pd.DataFrame(result_list,columns=['code','name','close','change_money','change_rate','zhenfu','vol','amount','pre_close','open','high','low','zhangdie_5min','liangbi','turnover','pe','timeToMarket'])
+            
+        return df_result
+
+    def __get_money_today_last(self):
+        # 当日个股资金流向数据
+        stock_money_today_url = 'http://nufm.dfcfw.com/EM_Finance2014NumericApplication/JS.aspx?type=ct&st=(BalFlowMain)&sr=-1&p=1&ps=5000&js=var%20DuFASpGM={pages:(pc),date:%222014-10-22%22,data:[(x)]}&token=894050c76af8597a853f5b408b759f5d&cmd=C._AB&sty=DCFFITA'
+        content = requests.get(stock_money_today_url, headers=get_user_agent_dict()).text
+        content = content.lstrip('var DuFASpGM=').strip()
+        content_json = demjson.decode(content)
+        stocks = [stock.split(',') for stock in content_json.get('data')]
+        
+        # 处理空值的正则表达式
+        regex_null = re.compile(r'^-$')
+        # 存储最终结果
+        result_list = []
+        
+        for stock in stocks:
+            stock_name = stock[1:3]         # 获取股票代码、名称
+            stock_money = stock[5:15]       # 获取股票资金数据
+            
+            # 处理空值
+            stock_money = list(map(lambda x: '0' if regex_null.match(x) else x, stock_money))
+            # 去掉%
+            stock_money = [item.strip().rstrip('%') for item in stock_money]
+            # 转换成数字
+            stock_money = [float(item) for item in stock_money]
+            # 转换数据单位，原金额值的单位是万
+            stock_money = list(map(lambda money: money[1]*10000 if money[0]%2==0 else money[1], enumerate(stock_money)))
+
+            # 将2个列表连成1个列表，形成最终结果
+            stock_name.extend(stock_money)
+            result = stock_name
+            
+            result_list.append(result)
+            
+        # 将数据封装成DataFrame
+        df_result = pd.DataFrame(result_list,columns=['code','name','main_money','main_money_rate','super_money','super_money_rate','large_money','large_money_rate','midden_money','midden_money_rate','small_money','small_money_rate'])
+            
+        return df_result
+        
+    def __trade_today_to_db(self,data):
+        stock_trade_list = []
+        for index in data.index:
+            '''
+            code                                     300742
+            name                                        N越博
+            close                                     33.61
+            change_money                              10.27
+            change_rate                                  44
+            zhenfu                                    23.99
+            vol                                       12400
+            amount                                   415556
+            pre_close                                 23.34
+            open                                      28.01
+            high                                      33.61
+            low                                       28.01
+            zhangdie_5min                                 0
+            liangbi                                       0
+            turnover                                   0.06
+            pe                                            0
+            timeToMarket                2018-05-08 00:00:00
+            main_money                               211700
+            main_money_rate                            51.3
+            super_money                              211700
+            super_money_rate                           51.3
+            large_money                                   0
+            large_money_rate                              0
+            midden_money                             181500
+            midden_money_rate                         43.97
+            small_money                             -393200
+            small_money_rate                         -95.27
+            trade_date           2018-05-08 14:25:51.474365
+            '''
+            row = data.ix[index]
+            stock_trade = StockTradeMoneyToday()
+            stock_trade.code = row['code']
+            stock_trade.name = row['name']
+            stock_trade.trade_date = row['trade_date']
+            stock_trade.timeToMarket = row['timeToMarket']
+            stock_trade.close = row['close']
+            stock_trade.change_money = row['change_money']
+            stock_trade.change_rate = row['change_rate']
+            stock_trade.zhen_rate = row['zhenfu']
+            stock_trade.vol = row['vol']
+            stock_trade.amount = row['amount']
+            stock_trade.pre_close = row['pre_close']
+            stock_trade.open = row['open']
+            stock_trade.high = row['high']
+            stock_trade.low = row['low']
+            stock_trade.zhangdie_5min = row['zhangdie_5min']
+            stock_trade.liangbi= row['liangbi']
+            stock_trade.turnover = row['turnover']
+            stock_trade.pe = row['pe']
+            stock_trade.main_money = row['main_money']
+            stock_trade.main_money_rate = row['main_money_rate']
+            stock_trade.super_money = row['super_money']
+            stock_trade.super_money_rate = row['super_money_rate']
+            stock_trade.large_money = row['large_money']
+            stock_trade.large_money_rate = row['large_money_rate']
+            stock_trade.midden_money = row['midden_money']
+            stock_trade.midden_money_rate = row['midden_money_rate']
+            stock_trade.small_money = row['small_money']
+            stock_trade.small_money_rate = row['small_money_rate']
+            stock_trade_list.append(stock_trade)
+            
+        StockTradeMoneyToday.objects.bulk_create(stock_trade_list)
     
     
     
